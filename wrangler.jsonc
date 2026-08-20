@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "justmysocks",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "CACHE_FRESH_TTL_SECONDS": "600",
+    "CACHE_STALE_TTL_SECONDS": "3600",
+    "CACHE_FAILURE_COOLDOWN_SECONDS": "30"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
+  }
+}

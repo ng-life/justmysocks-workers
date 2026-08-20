@@ -1,0 +1,2 @@
+# 可选；设置后业务接口需要 token 参数或 Authorization: Bearer <token>
+ACCESS_TOKEN=change-me
