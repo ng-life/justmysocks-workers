@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  abbreviateClashNodeNames,
   buildClashUrl,
   buildTrafficUrl,
   cachedUpstream,
@@ -42,18 +43,41 @@ describe("URL construction", () => {
   });
 });
 
+describe("Clash node names", () => {
+  it("abbreviates JMS nodes and updates proxy group references", () => {
+    const yaml = `
+# keep this comment
+proxies:
+  - {name: "JMS-1@c2s1.example.com:5086", type: ss, server: 192.0.2.1, port: 5086}
+  - {name: "Custom Node", type: ss, server: 192.0.2.2, port: 5087}
+proxy-groups:
+  - name: Auto
+    type: select
+    proxies: ["JMS-1@c2s1.example.com:5086", "Custom Node"]
+`;
+
+    const result = abbreviateClashNodeNames(yaml);
+
+    expect(result).toContain("# keep this comment");
+    expect(result).toContain('name: "c2s1"');
+    expect(result).toContain('name: "Custom Node"');
+    expect(result).toContain('proxies: [ "c2s1", "Custom Node" ]');
+    expect(result).not.toContain("JMS-1@c2s1.example.com:5086");
+  });
+});
+
 describe("Clash to Quantumult X", () => {
-  it("preserves the original server and converts JMS SS and VLESS", () => {
+  it("uses normalized node names while converting SS and VLESS", () => {
     const yaml = `
 proxies:
-  - name: "JMS-1@c2s1.example.com:5086"
+  - name: c2s1
     type: ss
     server: 192.0.2.1
     port: 5086
     cipher: aes-256-gcm
     password: secret
     udp: true
-  - name: "JMS-1@c2s3.example.com:443"
+  - name: c2s3
     type: vless
     server: 192.0.2.3
     port: 443
@@ -79,7 +103,7 @@ describe("Clash to Loon", () => {
   it("converts supported nodes with Loon parameter names and quoting", () => {
     const yaml = `
 proxies:
-  - {name: "JMS-1@c2s1.example.com:1001", type: ss, server: 192.0.2.1, port: 1001, cipher: aes-256-gcm, password: "sec,ret", udp: true}
+  - {name: c2s1, type: ss, server: 192.0.2.1, port: 1001, cipher: aes-256-gcm, password: "sec,ret", udp: true}
   - name: VMess WS
     type: vmess
     server: vmess.example.com

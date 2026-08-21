@@ -1,4 +1,4 @@
-import { parse } from "yaml";
+import { isMap, isScalar, isSeq, parse, parseDocument } from "yaml";
 
 const CLASH_ENDPOINT = "https://jmssub.net/members/getsub.php";
 const TRAFFIC_ENDPOINT = "https://justmysocks6.net/members/getbwcounter.php";
@@ -301,10 +301,11 @@ async function loadOrRefresh<T>(
 }
 
 async function cacheKey(kind: "clash" | "traffic", url: URL, cacheOrigin: string): Promise<string> {
-  const input = new TextEncoder().encode(`${kind}\0${url.toString()}`);
+  const version = kind === "clash" ? "v2" : "v1";
+  const input = new TextEncoder().encode(`${kind}\0${version}\0${url.toString()}`);
   const digest = await crypto.subtle.digest("SHA-256", input);
   const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return new URL(`/__upstream_cache/${kind}/${hash}`, cacheOrigin).toString();
+  return new URL(`/__upstream_cache/${kind}/${version}/${hash}`, cacheOrigin).toString();
 }
 
 async function readEnvelope<T>(
@@ -391,7 +392,7 @@ async function fetchClash(url: URL): Promise<string> {
   if (!response.ok) throw new HttpError(502, `upstream returned HTTP ${response.status}`);
   const body = await response.text();
   if (!isValidClash(body)) throw new HttpError(502, "upstream returned invalid Clash YAML");
-  return body;
+  return abbreviateClashNodeNames(body);
 }
 
 async function fetchTraffic(url: URL): Promise<TrafficRaw> {
@@ -411,6 +412,46 @@ function isValidClash(value: unknown): value is string {
     return isRecord(document) && Array.isArray(document.proxies);
   } catch {
     return false;
+  }
+}
+
+export function abbreviateClashNodeNames(input: string): string {
+  const document = parseDocument(input);
+  if (document.errors.length > 0 || !isMap(document.contents)) {
+    throw new HttpError(422, "invalid Clash YAML");
+  }
+  const proxies = document.get("proxies", true);
+  if (!isSeq(proxies)) {
+    throw new HttpError(422, "Clash YAML does not contain proxies");
+  }
+
+  const renamedNodes = new Map<string, string>();
+  for (const proxy of proxies.items) {
+    if (!isMap(proxy)) continue;
+    const name = proxy.get("name", true);
+    if (!isScalar(name) || typeof name.value !== "string") continue;
+    const abbreviated = abbreviateJmsName(name.value);
+    if (abbreviated === undefined || abbreviated === name.value) continue;
+    renamedNodes.set(name.value, abbreviated);
+    name.value = abbreviated;
+  }
+  if (renamedNodes.size === 0) return input;
+
+  updateProxyGroupReferences(document.get("proxy-groups", true), renamedNodes);
+  return document.toString();
+}
+
+function updateProxyGroupReferences(value: unknown, renamedNodes: ReadonlyMap<string, string>): void {
+  if (!isSeq(value)) return;
+  for (const group of value.items) {
+    if (!isMap(group)) continue;
+    const proxies = group.get("proxies", true);
+    if (!isSeq(proxies)) continue;
+    for (const proxy of proxies.items) {
+      if (!isScalar(proxy) || typeof proxy.value !== "string") continue;
+      const abbreviated = renamedNodes.get(proxy.value);
+      if (abbreviated !== undefined) proxy.value = abbreviated;
+    }
   }
 }
 
@@ -547,7 +588,7 @@ function convertProxyToLoon(proxy: Proxy): string | undefined {
   const type = stringField(proxy, "type").toLowerCase();
   const server = stringField(proxy, "server");
   const port = numberOrString(proxy, "port");
-  const name = loonName(jmsTag(stringField(proxy, "name")));
+  const name = loonName(stringField(proxy, "name"));
   const udp = boolField(proxy, "udp", true);
 
   if (type === "ss") {
@@ -639,7 +680,7 @@ function convertProxy(proxy: Proxy): string | undefined {
   const type = stringField(proxy, "type").toLowerCase();
   const server = stringField(proxy, "server");
   const port = numberOrString(proxy, "port");
-  const tag = jmsTag(stringField(proxy, "name"));
+  const tag = clean(stringField(proxy, "name"));
   const base = `${server}:${port}`;
   if (type === "ss") {
     return `shadowsocks=${base}, method=${stringField(proxy, "cipher")}, password=${clean(stringField(proxy, "password"))}, udp-relay=${boolField(proxy, "udp", true)}, tag=${tag}`;
@@ -706,10 +747,10 @@ function convertProxy(proxy: Proxy): string | undefined {
   return undefined;
 }
 
-function jmsTag(name: string): string {
+function abbreviateJmsName(name: string): string | undefined {
   const endpoint = name.includes("@") ? name.slice(name.lastIndexOf("@") + 1) : "";
   const host = endpoint.replace(/:\d+$/, "");
-  return clean(host.includes(".") ? host.split(".")[0] : name);
+  return host.includes(".") ? clean(host.split(".")[0]) : undefined;
 }
 
 function stringField(value: Proxy, key: string): string {

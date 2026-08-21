@@ -4,7 +4,8 @@
 
 ## 功能
 
-- `GET /clash`：返回原始 Clash YAML 订阅
+- 从 JMS 获取 Clash 订阅后，统一将节点名称替换为缩写
+- `GET /clash`：返回节点名称已规范化的 Clash YAML 订阅
 - `GET /quanx`：返回 Quantumult X 节点订阅
 - `GET /loon`：返回 Loon 节点订阅
 - `GET /api/subscription`：返回总量、已用、剩余流量和下次重置时间
